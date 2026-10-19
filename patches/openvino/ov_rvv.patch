@@ -1,0 +1,59 @@
+diff --git a/src/plugins/intel_cpu/src/nodes/conv.cpp b/src/plugins/intel_cpu/src/nodes/conv.cpp
+index b93476c5..c412c6e9 100644
+--- a/src/plugins/intel_cpu/src/nodes/conv.cpp
++++ b/src/plugins/intel_cpu/src/nodes/conv.cpp
+@@ -280,6 +280,7 @@ bool Convolution::canBeExecutedInInt8() const {
+ const std::vector<impl_desc_type>& Convolution::getDefaultImplPriority() {
+     static const std::vector<impl_desc_type> priorities = {
+         impl_desc_type::unknown,
++        impl_desc_type::brgemm,
+         impl_desc_type::dw_acl,
+         impl_desc_type::winograd_acl,
+         impl_desc_type::gemm_acl,
+diff --git a/src/plugins/intel_cpu/src/nodes/executors/convolution_implementations.cpp b/src/plugins/intel_cpu/src/nodes/executors/convolution_implementations.cpp
+index 0de6f176..739b6ddf 100644
+--- a/src/plugins/intel_cpu/src/nodes/executors/convolution_implementations.cpp
++++ b/src/plugins/intel_cpu/src/nodes/executors/convolution_implementations.cpp
+@@ -277,6 +277,42 @@ const std::vector<ExecutorImplementation<ConvAttrs>>& getImplementations() {
+             AcceptsAnyShape<ConvAttrs>,
+             CreateDnnlDefault<DnnlConvolutionPrimitive, ConvAttrs>{}
+             )
++        OV_CPU_INSTANCE_RISCV64(
++            "convolution_dnnl_rvv_nspc", ExecutorType::Dnnl, OperationType::Convolution,
++            [](const ConvConfig& config, const MemoryFormatFilter& memoryFormatFilter) -> bool {
++                VERIFY(!isQuantized(config), UNSUPPORTED_SRC_PRECISIONS);
++                VERIFY(srcType(config) == ov::element::f32, UNSUPPORTED_SRC_PRECISIONS);
++                VERIFY(config.attrs.postOps.empty(), UNSUPPORTED_POST_OPS);
++
++                // RVV BRGEMM currently supports only suitable static 2D convolutions.
++                VERIFY(!config.attrs.isGrouped, HEURISTICS_MISMATCH);
++
++                const auto& srcShape = config.descs.at(ARG_SRC)->getShape();
++                const auto& dstShape = config.descs.at(ARG_DST)->getShape();
++
++                VERIFY(srcShape.isStatic() && dstShape.isStatic(), HEURISTICS_MISMATCH);
++
++                const auto& srcDims = srcShape.getDims();
++                const auto& dstDims = dstShape.getDims();
++
++                VERIFY(srcDims.size() == 4 && dstDims.size() == 4, HEURISTICS_MISMATCH);
++
++                // Logical dimensions are NCHW, regardless of physical memory layout.
++                const auto inputChannels = srcDims[1];
++                const auto outputWidth = dstDims[3];
++
++                VERIFY(inputChannels >= 16 && outputWidth >= 20, HEURISTICS_MISMATCH);
++
++                return MatchesMemoryFormatFilter(
++                    config.descs,
++                    LayoutConfig{LayoutType::nspc, LayoutType::ncsp, LayoutType::nspc, LayoutType::nspc},
++                    memoryFormatFilter,
++                    dnnlConvolutionMappingNotation);
++            },
++            CreateOptimalConfigDefault{{LayoutType::nspc, LayoutType::ncsp, LayoutType::nspc, LayoutType::nspc}},
++            AcceptsAnyShape<ConvAttrs>,
++            CreateDnnlDefault<DnnlConvolutionPrimitive, ConvAttrs>{}
++            )
+         OV_CPU_INSTANCE_RISCV64(
+             "convolution_dnnl_ref_ncsp", ExecutorType::Dnnl, OperationType::Convolution,
+             // supports

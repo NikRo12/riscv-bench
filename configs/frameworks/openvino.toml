@@ -1,0 +1,70 @@
+# OpenVINO 2026.4.0 + oneTBB v2022.3.0, как собиралось вручную (см. отчёт 1 и 2).
+
+[source]
+name    = "openvino"
+repo    = "https://github.com/openvinotoolkit/openvino.git"
+version = "2026.4.0"
+submodules = true
+
+[[deps]]
+name    = "oneTBB"
+repo    = "https://github.com/uxlfoundation/oneTBB.git"
+version = "v2022.3.0"
+
+# Патчи применяются к чистым исходникам. dir - каталог относительно исходников фреймворка.
+# ВАЖНО: правки сняты с платы; автор нативной сборки их происхождение пока не подтвердил.
+# Без них свёртки идут через ref и сборка в 1,8 раза медленнее нативной.
+[[patches]]
+file = "ov_rvv.patch"
+dir  = "."
+note = "conv.cpp + convolution_implementations.cpp: исполнитель convolution_dnnl_rvv_nspc (FP32, >=16 каналов, ширина выхода >=20)"
+
+[[patches]]
+file = "onednn_rvv.patch"
+dir  = "src/plugins/intel_cpu/thirdparty/onednn"
+note = "cpu_convolution_list.cpp: регистрация rvv_brgemm_convolution_fwd_t (brgemm:rvv)"
+
+# Шаги сборки по порядку. Доступные подстановки: {work} {sysroot} {toolchain_file} {tbb_prefix} {jobs}
+[[build]]
+name        = "oneTBB"
+source      = "{work}/src/oneTBB"
+build_dir   = "{work}/build/tbb"
+install_prefix = "{tbb_prefix}"
+targets     = []
+args = ["-DTBB_TEST=OFF", "-DTBB_EXAMPLES=OFF"]
+
+[[build]]
+name        = "openvino"
+source      = "{work}/src/openvino"
+build_dir   = "{work}/build/ov"
+install_prefix = ""
+targets     = ["openvino_intel_cpu_plugin", "openvino_ir_frontend", "benchmark_app"]
+args = [
+  "-DCMAKE_FIND_ROOT_PATH={sysroot};{tbb_prefix}",
+  "-DENABLE_INTEL_CPU=ON", "-DENABLE_INTEL_GPU=OFF", "-DENABLE_INTEL_NPU=OFF",
+  "-DENABLE_PYTHON=OFF", "-DENABLE_TESTS=OFF", "-DENABLE_JS=OFF",
+  "-DENABLE_CLANG_FORMAT=OFF", "-DENABLE_NCC_STYLE=OFF",
+  "-DENABLE_OV_IR_FRONTEND=ON",
+  "-DENABLE_OV_ONNX_FRONTEND=OFF", "-DENABLE_OV_PYTORCH_FRONTEND=OFF",
+  "-DENABLE_OV_TF_FRONTEND=OFF", "-DENABLE_OV_TF_LITE_FRONTEND=OFF",
+  "-DENABLE_OV_PADDLE_FRONTEND=OFF", "-DENABLE_OV_JAX_FRONTEND=OFF",
+  "-DENABLE_OV_GGUF_FRONTEND=OFF",
+  "-DENABLE_SYSTEM_TBB=ON", "-DENABLE_TBBBIND_2_5=OFF",
+  "-DTBB_DIR={tbb_prefix}/lib/cmake/TBB",
+]
+
+# Что класть в бандл: каталог-источник, маски файлов, куда положить (bin/ или tbb/).
+# Раскладка bin + tbb повторяет ту, что проверена на плате.
+[[bundle]]
+src      = "{work}/src/openvino/bin/riscv64/Release"
+patterns = ["benchmark_app", "libopenvino.so*", "libopenvino_ir_frontend.so*", "libopenvino_riscv_cpu_plugin.so"]
+dest     = "bin"
+
+[[bundle]]
+src      = "{tbb_prefix}/lib"
+patterns = ["libtbb.so*", "libtbbmalloc.so*", "libtbbmalloc_proxy.so*"]
+dest     = "tbb"
+
+[run]
+# Имя исполняемого файла бенчмарка внутри bin/ (для run.sh)
+benchmark = "benchmark_app"

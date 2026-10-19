@@ -1,0 +1,5 @@
+name      = "resnet50"
+format    = "openvino-ir"                 # готовый .xml/.bin, конвертация не нужна
+path      = "models/resnet50/resnet-50-pytorch.xml"   # относительно корня проекта
+precision = "f32"
+input     = "data [1,3,224,224]"

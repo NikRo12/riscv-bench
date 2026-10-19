@@ -1,0 +1,31 @@
+# Целевая плата и кросс-компилятор. Общее для всех фреймворков.
+
+[board]
+name = "SpacemiT K3 (X100)"
+# Совпадает с -march нативной сборки на плате (flags.make): RVV + half-float векторы.
+# Полный список расширений GCC платы (--with-arch) длиннее; он не проверялся, поэтому не используется.
+arch = "rv64gcv_zvfh"
+abi = "lp64d"
+# spacemit-x100 стоковый GCC не знает; sifive-p670 - ближайшее OoO-ядро с RVV.
+tune = "sifive-p670"
+
+[toolchain]
+cc  = "riscv64-linux-gnu-gcc-15"
+cxx = "riscv64-linux-gnu-g++-15"
+readelf = "riscv64-linux-gnu-readelf"
+
+# Утилиты для сборки (ставятся через micromamba в work/toolchain/env, root не нужен)
+conda_packages = ["git", "cmake", "ninja", "make", "curl"]
+
+# Кросс-GCC из Ubuntu: apt download + dpkg -x в work/toolchain/root (он же sysroot)
+cross_debs = [
+  "binutils-riscv64-linux-gnu", "cpp-15-riscv64-linux-gnu", "g++-15-riscv64-linux-gnu",
+  "gcc-15-riscv64-linux-gnu", "gcc-15-riscv64-linux-gnu-base", "gcc-15-cross-base",
+  "libasan8-riscv64-cross", "libatomic1-riscv64-cross", "libc6-dev-riscv64-cross",
+  "libc6-riscv64-cross", "libgcc-15-dev-riscv64-cross", "libgcc-s1-riscv64-cross",
+  "libgomp1-riscv64-cross", "libitm1-riscv64-cross", "liblsan0-riscv64-cross",
+  "libstdc++-15-dev-riscv64-cross", "libstdc++6-riscv64-cross", "libtsan2-riscv64-cross",
+  "libubsan1-riscv64-cross", "linux-libc-dev-riscv64-cross",
+]
+# Библиотеки x86, без которых сам кросс-компилятор не запускается
+host_debs = ["libisl23", "libmpc3", "libmpfr6", "libjansson4", "libsframe3", "binutils-common"]
