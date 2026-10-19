@@ -1,23 +1,40 @@
-# Целевая плата и кросс-компилятор. Общее для всех фреймворков.
+# Целевая плата, кросс-компилятор и требования к серверу.
+# Это общее для всех фреймворков и моделей. Описание каждого ключа: docs/CONFIG.md.
 
 [board]
 name = "SpacemiT K3 (X100)"
-# Совпадает с -march нативной сборки на плате (flags.make): RVV + half-float векторы.
-# Полный список расширений GCC платы (--with-arch) длиннее; он не проверялся, поэтому не используется.
+
+# -march: набор команд процессора. Значение взято из flags.make нативной сборки на плате.
+# Узнать у своей платы:  grep -m1 isa /proc/cpuinfo   и   c++ -Q --help=target | grep -E "^\s+-m(arch|abi)="
+# rv64gcv_zvfh = 64 бит + стандартный набор (g) + сжатые команды (c) + векторы RVV (v) + векторный half-float (zvfh)
 arch = "rv64gcv_zvfh"
+
+# -mabi: как передаются аргументы функций. Должен совпадать с системой на плате.
 abi = "lp64d"
-# spacemit-x100 стоковый GCC не знает; sifive-p670 - ближайшее OoO-ядро с RVV.
+
+# -mtune: под какое ядро оптимизировать. Родной spacemit-x100 стоковый GCC не знает
+# (ошибка "unknown cpu"), поэтому взято ближайшее известное ядро с RVV.
 tune = "sifive-p670"
 
+# Системные библиотеки платы: их НЕ нужно класть в бандл (проверка verify пропускает их по префиксу имени).
+system_libs = ["libc.so", "libm.so", "libstdc++", "libgcc_s", "ld-linux", "libpthread", "libdl", "librt", "libgomp"]
+
+
 [toolchain]
-cc  = "riscv64-linux-gnu-gcc-15"
+# Кросс-компиляторы (запускаются на x86-сервере, собирают код для RISC-V)
+cc = "riscv64-linux-gnu-gcc-15"
 cxx = "riscv64-linux-gnu-g++-15"
 readelf = "riscv64-linux-gnu-readelf"
 
-# Утилиты для сборки (ставятся через micromamba в work/toolchain/env, root не нужен)
+# micromamba (менеджер пакетов без root) и канал, откуда ставим cmake/ninja/git
+micromamba_url = "https://micro.mamba.pm/api/micromamba/linux-64/latest"
+conda_channel = "conda-forge"
 conda_packages = ["git", "cmake", "ninja", "make", "curl"]
 
-# Кросс-GCC из Ubuntu: apt download + dpkg -x в work/toolchain/root (он же sysroot)
+# Кросс-GCC из Ubuntu: скачиваются `apt download` и распаковываются `dpkg -x` в work/toolchain/root
+# (эта же папка - sysroot с libc платы). Версии берёт apt из репозитория сервера.
+# Как составить список: apt-cache depends --recurse gcc-15-riscv64-linux-gnu g++-15-riscv64-linux-gnu \
+#   libc6-dev-riscv64-cross libstdc++-15-dev-riscv64-cross | grep -E "^[a-z0-9]" | grep -E "riscv64|cross"
 cross_debs = [
   "binutils-riscv64-linux-gnu", "cpp-15-riscv64-linux-gnu", "g++-15-riscv64-linux-gnu",
   "gcc-15-riscv64-linux-gnu", "gcc-15-riscv64-linux-gnu-base", "gcc-15-cross-base",
@@ -27,5 +44,15 @@ cross_debs = [
   "libstdc++-15-dev-riscv64-cross", "libstdc++6-riscv64-cross", "libtsan2-riscv64-cross",
   "libubsan1-riscv64-cross", "linux-libc-dev-riscv64-cross",
 ]
-# Библиотеки x86, без которых сам кросс-компилятор не запускается
+
+# x86-библиотеки, без которых сам кросс-компилятор не запускается
+# (симптом: "error while loading shared libraries: libisl.so.23").
 host_debs = ["libisl23", "libmpc3", "libmpfr6", "libjansson4", "libsframe3", "binutils-common"]
+
+
+[host]
+# Требования к серверу для этапа doctor. Прошлая сборка OpenVINO заняла 3,1 ГБ в work/.
+min_disk_gb = 8
+comfortable_disk_gb = 12
+# Адреса, до которых должна быть сеть (адрес micromamba проверяется автоматически)
+check_urls = ["https://github.com"]

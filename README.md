@@ -1,17 +1,138 @@
 # riscv-bench
 
-Кросс-сборка OpenVINO (+oneTBB) для SpacemiT K3 и готовая папка для платы.
+Утилита для кросс-компиляции ML-фреймворка под RISC-V плату и замера скорости инференса.
+Запускается на x86-сервере, **без root**. На выходе - папка-бандл, которую вручную переносят
+на плату и запускают там одной командой.
 
-## На сервере
-    cp /путь/к/resnet-50-pytorch.{xml,bin} models/resnet50/   # модель (скопировать с платы)
-    python3 build.py doctor      # проверка сервера
-    python3 build.py all         # bootstrap -> fetch -> patch -> build -> package -> verify
-Этапы можно запускать по одному (`bootstrap`, `fetch`, `patch`, `build`, `package`, `verify`).
-Повторить этап: `--force`. Логи: `work/logs/<этап>.log`.
+Сейчас проверено на связке **OpenVINO 2026.4.0 + ResNet-50 (FP32)** для платы **SpacemiT K3 (X100)**:
+бандл, собранный этой утилитой, показал **51,1 с** на 8 потоках (niter=1) против 51,8 с у нативной
+сборки на самой плате. Остальные фреймворки и модели добавляются конфигами, см. [docs/ADDING.md](docs/ADDING.md).
 
-Результат: `out/openvino-resnet50/` и `out/openvino-resnet50.tar.gz`.
+## Как это работает
 
-## На плате
-    tar xzf openvino-resnet50.tar.gz && cd openvino-resnet50
-    ./run.sh            # потоки 1 2 4 8, NITER=5;  ./run.sh 8  /  NITER=1 ./run.sh 8
-Результаты: `results/<время>/results.csv`.
+Утилита читает три TOML-файла (плата, фреймворк, модель) и выполняет этапы по порядку:
+
+```
+doctor -> bootstrap -> fetch -> patch -> build -> package -> verify          (на сервере)
+                                                                |
+                              out/<фреймворк>-<модель>.tar.gz --+--> плата: ./run.sh   (на плате)
+```
+
+| Этап | Что делает |
+|---|---|
+| `doctor` | проверяет сервер: Python, `apt`/`dpkg`/`tar`, место на диске, сеть. Ничего не ставит |
+| `bootstrap` | ставит `cmake`, `ninja`, `git` (micromamba) и кросс-GCC (`.deb` через `apt download` + `dpkg -x`), собирает пробную программу |
+| `fetch` | скачивает исходники фреймворка и зависимостей нужной версии (`git clone --depth 1`) |
+| `patch` | накладывает патчи из `patches/<фреймворк>/`; повторный запуск безопасен |
+| `build` | собирает зависимости и фреймворк CMake + Ninja кросс-компилятором |
+| `package` | собирает бандл: библиотеки, модель, `run.sh`, `MANIFEST.txt`, плюс `.tar.gz` |
+| `verify` | проверяет бандл: все файлы под RISC-V, зависимости на месте, строки патчей в бинарнике |
+
+Тяжёлые этапы (`bootstrap`, `fetch`, `patch`, `build`) оставляют метку в `work/stamps/`, и `all` их
+пропускает, если они уже сделаны. Этап, названный отдельно (`build.py build`), выполняется всегда; при `all`
+повторить сделанный этап принудительно позволяет `--force`.
+
+## Быстрый старт
+
+Нужно: Linux x86_64 с `apt` (Ubuntu/Debian), Python >= 3.11, доступ в интернет, ~8 ГБ свободного
+места (прошлая сборка заняла 3,1 ГБ в `work/`). Ставить ничего не нужно, Python-зависимостей нет.
+
+```bash
+git clone <адрес-репозитория> riscv-bench && cd riscv-bench
+
+# 1. Положить файлы модели в models/resnet50/ (откуда их взять - см. configs/models/resnet50.toml)
+scp student@<плата>:~/openvino_project/models/fp32/resnet-50-pytorch.* models/resnet50/
+
+# 2. Проверить сервер
+python3 build.py doctor
+
+# 3. Собрать всё (долго; в фоне, чтобы обрыв ssh не убил сборку)
+nohup python3 build.py all > work/all.log 2>&1 &
+tail -f work/all.log          # выйти из tail: Ctrl+C, сборка продолжится
+```
+
+Если на сервере нет системного `git`, возьмите наш: после `bootstrap` он лежит в `work/toolchain/env/bin`
+(`export PATH=$PWD/work/toolchain/env/bin:$PATH`). Для самого `build.py` это не требуется: он подключает
+свои инструменты сам.
+
+Результат: `out/openvino-resnet50/` и `out/openvino-resnet50.tar.gz` (около 110 МБ).
+
+### На плате
+
+```bash
+scp out/openvino-resnet50.tar.gz student@<плата>:~
+# на плате:
+tar xzf openvino-resnet50.tar.gz && cd openvino-resnet50
+NITER=1 ./run.sh 8          # быстрая проверка: 1 итерация, 8 потоков (~1 минута)
+./run.sh                    # полный замер: потоки 1 2 4 8, NITER=5 (долго)
+```
+
+Результаты: `results/<время>/results.csv` (медиана, среднее, минимум, максимум, FPS по каждому числу
+потоков) и полные логи `threads_N.log`. Перед запуском на плате лучше открыть новый ssh-сеанс или
+выполнить `unset LD_LIBRARY_PATH`, чтобы старый OpenVINO на плате не подмешался.
+
+## Структура репозитория
+
+```
+build.py                    точка входа: аргументы и запуск этапов
+rvb/                        код
+  context.py                Ctx: пути, конфиги, подстановки {work} {src} ...
+  config.py                 чтение и проверка TOML
+  runner.py                 запуск команд с логом в work/logs/
+  stamps.py                 метки «этап выполнен»
+  toolchain.py              генерация CMake toolchain-файла
+  manifest.py, gitutil.py, util.py
+  stages/                   по файлу на этап (doctor.py, bootstrap.py, ... verify.py)
+configs/
+  target.toml               плата и кросс-компилятор (общее для всех)
+  frameworks/openvino.toml  что и как собирать, что класть в бандл, как запускать
+  models/resnet50.toml      файлы модели
+patches/openvino/           патчи исходников (*.patch)
+templates/run.sh            шаблон скрипта замера, который едет на плату
+tests/test_offline.py       офлайн-тесты (без сети и сборки)
+docs/                       CONFIG.md, ADDING.md, TROUBLESHOOTING.md
+```
+
+Создаётся при работе и в git не попадает (`.gitignore`): `work/` (компилятор, исходники, сборка, логи),
+`out/` (бандл и архив), файлы моделей в `models/`.
+
+## Бандл
+
+```
+openvino-resnet50/
+  bin/            benchmark_app, libopenvino*.so*, плагин CPU (симлинки сохранены)
+  tbb/            libtbb*.so*
+  model/          resnet-50-pytorch.xml и .bin
+  run.sh          замер скорости
+  MANIFEST.txt    паспорт: плата, -march, коммиты исходников, хеши патчей, sha256 всех файлов
+```
+
+## Логи и отладка
+
+Весь вывод каждого этапа пишется в `work/logs/<этап>.log` (сборка: `build-<имя>.log`). На экране
+остаётся только последняя строка. При ошибке скрипт сам называет нужный лог. Типичные проблемы и
+решения: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+## Настройка под своё
+
+- какие значения писать в конфиги и где их брать: [docs/CONFIG.md](docs/CONFIG.md)
+- добавить модель, фреймворк, патч или другую плату: [docs/ADDING.md](docs/ADDING.md)
+
+## Тесты
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+Тесты работают офлайн: настоящие `cmake` и `readelf` заменены заглушками. Проверяют конфиги,
+подстановки, команды `cmake`, патчи (в том числе повторное наложение), бандл, `verify` и `run.sh`.
+Для теста патчей нужен `git`. Запускайте их после любых правок в `rvb/` и конфигах.
+
+## Что проверено и что нет
+
+- Проверено на реальном сервере и плате: весь путь OpenVINO + ResNet-50 от `doctor` до замера на плате.
+- Не проверялось: другие фреймворки и модели, другие платы, хосты не на Ubuntu/Debian.
+- `build` умеет только CMake; для другой системы сборки нужно дописать функцию в `rvb/stages/build.py`.
+- Патчи в `patches/openvino/` сняты с рабочей копии на плате; их происхождение автором не подтверждено.
+  Без них OpenVINO собирается, но в 1,8 раза медленнее.
+- Абсолютная скорость остаётся невысокой (~51 с на картинку): быстрая реализация свёрток включается
+  только на части слоёв (условия `inputChannels >= 16` и `outputWidth >= 20`).

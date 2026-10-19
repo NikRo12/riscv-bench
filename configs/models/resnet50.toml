@@ -1,5 +1,17 @@
-name      = "resnet50"
-format    = "openvino-ir"                 # готовый .xml/.bin, конвертация не нужна
-path      = "models/resnet50/resnet-50-pytorch.xml"   # относительно корня проекта
+# ResNet-50 в формате OpenVINO IR. Описание ключей: docs/CONFIG.md.
+name = "resnet50"
+
+# Где лежат файлы модели (относительно корня репозитория). Сами файлы в git не хранятся (.gitignore).
+dir = "models/resnet50"
+
+# Что копировать в бандл (в папку model/)
+files = ["resnet-50-pytorch.xml", "resnet-50-pytorch.bin"]
+
+# Какой файл передавать бенчмарку как модель (подставится в {model})
+entry = "resnet-50-pytorch.xml"
+
+# Справочно (скриптом не используется)
+format = "openvino-ir"
 precision = "f32"
-input     = "data [1,3,224,224]"
+input = "data [1,3,224,224]"
+source_hint = "на плате: ~/openvino_project/models/fp32/resnet-50-pytorch.{xml,bin}"

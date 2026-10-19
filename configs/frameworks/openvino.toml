@@ -1,46 +1,54 @@
-# OpenVINO 2026.4.0 + oneTBB v2022.3.0, как собиралось вручную (см. отчёт 1 и 2).
+# OpenVINO 2026.4.0 + oneTBB v2022.3.0. Описание каждого ключа: docs/CONFIG.md.
+# Подстановки в путях и аргументах: {work} {src} {build} {install} {sysroot} {toolchain_file} {jobs}
 
+
+# ---------------------------------------------------------------- исходники
 [source]
-name    = "openvino"
-repo    = "https://github.com/openvinotoolkit/openvino.git"
-version = "2026.4.0"
-submodules = true
+name = "openvino"                                  # имя папки в work/src/
+repo = "https://github.com/openvinotoolkit/openvino.git"
+version = "2026.4.0"                               # тег (или ветка) для git clone
+commit = "99c81491cc302313c8937d3533c4fb6458b54e7a"   # необязательно: защита от сдвинутого тега
+submodules = true                                  # подтянуть подмодули (там oneDNN)
 
 [[deps]]
-name    = "oneTBB"
-repo    = "https://github.com/uxlfoundation/oneTBB.git"
+name = "oneTBB"
+repo = "https://github.com/uxlfoundation/oneTBB.git"
 version = "v2022.3.0"
+commit = "f1862f38f83568d96e814e469ab61f88336cc595"
 
-# Патчи применяются к чистым исходникам. dir - каталог относительно исходников фреймворка.
-# ВАЖНО: правки сняты с платы; автор нативной сборки их происхождение пока не подтвердил.
-# Без них свёртки идут через ref и сборка в 1,8 раза медленнее нативной.
+
+# ---------------------------------------------------------------- патчи
+# Применяются к чистым исходникам по порядку. dir - куда заходить перед `git apply`
+# (для подмодуля это его папка: у него свой git). Файлы лежат в patches/openvino/.
+# Эти правки сняты с рабочей копии на плате; их происхождение автором не подтверждено.
+# Без них свёртки идут через ref-реализацию, и сборка медленнее нативной в 1,8 раза (94 с против 51 с).
 [[patches]]
 file = "ov_rvv.patch"
-dir  = "."
-note = "conv.cpp + convolution_implementations.cpp: исполнитель convolution_dnnl_rvv_nspc (FP32, >=16 каналов, ширина выхода >=20)"
+dir = "."
+note = "conv.cpp + convolution_implementations.cpp: исполнитель convolution_dnnl_rvv_nspc (FP32, >=16 каналов, ширина выхода >=20); происхождение не подтверждено автором"
 
 [[patches]]
 file = "onednn_rvv.patch"
-dir  = "src/plugins/intel_cpu/thirdparty/onednn"
-note = "cpu_convolution_list.cpp: регистрация rvv_brgemm_convolution_fwd_t (brgemm:rvv)"
+dir = "src/plugins/intel_cpu/thirdparty/onednn"
+note = "cpu_convolution_list.cpp: регистрация rvv_brgemm_convolution_fwd_t (brgemm:rvv); происхождение не подтверждено автором"
 
-# Шаги сборки по порядку. Доступные подстановки: {work} {sysroot} {toolchain_file} {tbb_prefix} {jobs}
+
+# ---------------------------------------------------------------- сборка
+# Блоки выполняются по порядку: сначала зависимость (oneTBB), потом сам фреймворк.
 [[build]]
-name        = "oneTBB"
-source      = "{work}/src/oneTBB"
-build_dir   = "{work}/build/tbb"
-install_prefix = "{tbb_prefix}"
-targets     = []
+name = "oneTBB"
+source = "{src}/oneTBB"
+build_dir = "{build}/tbb"
+install_prefix = "{install}/tbb"                   # oneTBB нужно именно установить: OpenVINO ищет его через find_package
 args = ["-DTBB_TEST=OFF", "-DTBB_EXAMPLES=OFF"]
 
 [[build]]
-name        = "openvino"
-source      = "{work}/src/openvino"
-build_dir   = "{work}/build/ov"
-install_prefix = ""
-targets     = ["openvino_intel_cpu_plugin", "openvino_ir_frontend", "benchmark_app"]
+name = "openvino"
+source = "{src}/openvino"
+build_dir = "{build}/ov"
+targets = ["openvino_intel_cpu_plugin", "openvino_ir_frontend", "benchmark_app"]   # только нужные цели
 args = [
-  "-DCMAKE_FIND_ROOT_PATH={sysroot};{tbb_prefix}",
+  "-DCMAKE_FIND_ROOT_PATH={sysroot};{install}/tbb",
   "-DENABLE_INTEL_CPU=ON", "-DENABLE_INTEL_GPU=OFF", "-DENABLE_INTEL_NPU=OFF",
   "-DENABLE_PYTHON=OFF", "-DENABLE_TESTS=OFF", "-DENABLE_JS=OFF",
   "-DENABLE_CLANG_FORMAT=OFF", "-DENABLE_NCC_STYLE=OFF",
@@ -50,21 +58,47 @@ args = [
   "-DENABLE_OV_PADDLE_FRONTEND=OFF", "-DENABLE_OV_JAX_FRONTEND=OFF",
   "-DENABLE_OV_GGUF_FRONTEND=OFF",
   "-DENABLE_SYSTEM_TBB=ON", "-DENABLE_TBBBIND_2_5=OFF",
-  "-DTBB_DIR={tbb_prefix}/lib/cmake/TBB",
+  "-DTBB_DIR={install}/tbb/lib/cmake/TBB",
 ]
 
-# Что класть в бандл: каталог-источник, маски файлов, куда положить (bin/ или tbb/).
-# Раскладка bin + tbb повторяет ту, что проверена на плате.
+
+# ---------------------------------------------------------------- что класть в бандл
+# src - откуда, patterns - маски имён (* захватывает и версионные файлы, и симлинки), dest - куда внутри бандла.
 [[bundle]]
-src      = "{work}/src/openvino/bin/riscv64/Release"
+src = "{src}/openvino/bin/riscv64/Release"
 patterns = ["benchmark_app", "libopenvino.so*", "libopenvino_ir_frontend.so*", "libopenvino_riscv_cpu_plugin.so"]
-dest     = "bin"
+dest = "bin"
 
 [[bundle]]
-src      = "{tbb_prefix}/lib"
+src = "{install}/tbb/lib"
 patterns = ["libtbb.so*", "libtbbmalloc.so*", "libtbbmalloc_proxy.so*"]
-dest     = "tbb"
+dest = "tbb"
 
+
+# ---------------------------------------------------------------- запуск на плате (генерирует run.sh)
 [run]
-# Имя исполняемого файла бенчмарка внутри bin/ (для run.sh)
-benchmark = "benchmark_app"
+bench = "bin/benchmark_app"                        # исполняемый файл бенчмарка внутри бандла
+library_dirs = ["bin", "tbb"]                      # что добавить в LD_LIBRARY_PATH (пути внутри бандла)
+# Подстановки: {bench} {model} {threads} {niter}. Перед командой run.sh сам ставит `taskset -c 0-(threads-1)`.
+command = "{bench} -m {model} -d CPU -hint none -api sync -nthreads {threads} -nstreams 1 -nireq 1 -infer_precision f32 -niter {niter}"
+
+# Какие числа вытащить из вывода бенчмарка в results.csv. pattern - регулярка для sed -E,
+# число - в первой группе (...). Символ / в регулярке использовать нельзя.
+metrics = [
+  { name = "median_ms", pattern = 'Median:[[:space:]]+([0-9.]+) ms' },
+  { name = "avg_ms",    pattern = 'Average:[[:space:]]+([0-9.]+) ms' },
+  { name = "min_ms",    pattern = 'Min:[[:space:]]+([0-9.]+) ms' },
+  { name = "max_ms",    pattern = 'Max:[[:space:]]+([0-9.]+) ms' },
+  { name = "fps",       pattern = 'Throughput:[[:space:]]+([0-9.]+) FPS' },
+]
+
+
+# ---------------------------------------------------------------- проверка бандла (этап verify)
+[verify]
+# Эти файлы должны быть ELF под RISC-V и иметь все зависимости (внутри бандла или в системе платы)
+elf = ["bin/benchmark_app", "bin/libopenvino.so", "bin/libopenvino_riscv_cpu_plugin.so"]
+
+# Строки, которые обязаны быть в бинарнике: доказательство, что патчи попали в сборку
+[[verify.contains]]
+file = "bin/libopenvino_riscv_cpu_plugin.so"
+strings = ["convolution_dnnl_rvv_nspc", "rvv_brgemm"]
