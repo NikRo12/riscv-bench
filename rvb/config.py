@@ -40,7 +40,7 @@ def _need(table, keys, where):
 
 
 def validate_target(cfg, where="configs/target.toml"):
-    _need(_table(cfg, "board", where), ["name", "arch", "abi", "tune", "system_libs"], where + " [board]")
+    _need(_table(cfg, "board", where), ["name", "arch", "abi", "tune", "system_libs", "core_sets"], where + " [board]")
     _need(_table(cfg, "toolchain", where),
           ["cc", "cxx", "readelf", "micromamba_url", "conda_channel",
            "conda_packages", "cross_debs", "host_debs"], where + " [toolchain]")
@@ -58,7 +58,13 @@ def validate_framework(cfg, where):
     for bundle in _array(cfg, "bundle", where):
         _need(bundle, ["src", "patterns", "dest"], where + " [[bundle]]")
     run = _table(cfg, "run", where)
-    _need(run, ["bench", "library_dirs", "command", "metrics"], where + " [run]")
+    _need(run, ["bench", "library_dirs", "scenarios", "metrics"], where + " [run]")
+    for scenario in run["scenarios"]:
+        _need(scenario, ["name", "param", "values", "cpus", "command"], where + " [[run.scenarios]]")
+        if scenario["param"] not in ("threads", "batch"):
+            die(f"в {where} сценарий '{scenario['name']}': param должен быть threads или batch")
+        if scenario["cpus"] not in ("first", "all"):
+            die(f"в {where} сценарий '{scenario['name']}': cpus должен быть first или all")
     for metric in run["metrics"]:
         _need(metric, ["name", "pattern"], where + " [run] metrics")
     verify = _table(cfg, "verify", where)

@@ -8,27 +8,48 @@
     host_debs/, host/   x86-библиотеки, без которых не запускается сам кросс-компилятор
 """
 import glob
+import http.client
 import io
 import tarfile
+import time
 import urllib.request
 from pathlib import Path
 
 from ..runner import run as run_cmd
 from ..stamps import mark_done
 from ..toolchain import write_toolchain_file
-from ..util import note, say
+from ..util import die, note, say
 
 NAME = "bootstrap"
 HELP = "поставить cmake/ninja/git (micromamba) и кросс-GCC (.deb без root)"
 SKIP_IF_DONE = True
 
 
+DOWNLOAD_ATTEMPTS = 3         # сервер может отвечать медленно: разовый таймаут не повод падать
+DOWNLOAD_TIMEOUT = 120        # секунд на попытку
+
+
+def _download(url, what):
+    """Скачать файл целиком в память с повторами; после всех неудач - понятная ошибка."""
+    error = None
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        note(f"скачиваю {what} (попытка {attempt}/{DOWNLOAD_ATTEMPTS})")
+        try:
+            return urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT).read()
+        except (OSError, http.client.HTTPException) as ex:
+            error = ex
+            note(f"не удалось: {ex}")
+            if attempt < DOWNLOAD_ATTEMPTS:
+                time.sleep(5 * attempt)
+    die(f"не удалось скачать {what} с {url}: {error}. Проверьте доступ к адресу "
+        f"(например, curl -I {url}) и повторите: python3 build.py bootstrap")
+
+
 def _ensure_micromamba(ctx):
     micromamba = ctx.tc / "mm/bin/micromamba"
     if micromamba.exists():
         return micromamba
-    note("скачиваю micromamba")
-    data = urllib.request.urlopen(ctx.toolchain["micromamba_url"], timeout=120).read()
+    data = _download(ctx.toolchain["micromamba_url"], "micromamba")
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:bz2") as archive:
         archive.extractall(ctx.tc / "mm", filter="data")   # filter="data": не даём архиву писать за пределы папки
     return micromamba

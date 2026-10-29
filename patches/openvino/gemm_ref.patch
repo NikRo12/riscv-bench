@@ -1,0 +1,33 @@
+diff --git a/src/plugins/intel_cpu/src/onednn/iml_type_mapper.h b/src/plugins/intel_cpu/src/onednn/iml_type_mapper.h
+--- a/src/plugins/intel_cpu/src/onednn/iml_type_mapper.h
++++ b/src/plugins/intel_cpu/src/onednn/iml_type_mapper.h
+@@ -55,6 +55,7 @@
+     // real types
+     ref_any = ref | any,
+ 
++    gemm_ref = gemm | ref,
+     gemm_any = gemm | any,
+     gemm_blas = gemm | blas,
+     gemm_avx512 = gemm | avx512,
+diff --git a/src/plugins/intel_cpu/src/onednn/iml_type_mapper.cpp b/src/plugins/intel_cpu/src/onednn/iml_type_mapper.cpp
+--- a/src/plugins/intel_cpu/src/onednn/iml_type_mapper.cpp
++++ b/src/plugins/intel_cpu/src/onednn/iml_type_mapper.cpp
+@@ -94,6 +94,7 @@
+     CASE(ref);
+     CASE(ref_any);
+     CASE(reorder);
++    CASE(gemm_ref);
+     CASE(gemm_any);
+     CASE(gemm_blas);
+     CASE(gemm_avx512);
+diff --git a/src/plugins/intel_cpu/src/nodes/conv.cpp b/src/plugins/intel_cpu/src/nodes/conv.cpp
+--- a/src/plugins/intel_cpu/src/nodes/conv.cpp
++++ b/src/plugins/intel_cpu/src/nodes/conv.cpp
+@@ -312,6 +312,7 @@
+         impl_desc_type::jit_sse42_dw,
+         impl_desc_type::jit_sse42_1x1,
+         impl_desc_type::jit_sse42,
++        impl_desc_type::gemm_ref,
+         impl_desc_type::gemm_any,
+         impl_desc_type::gemm_blas,
+         impl_desc_type::gemm_avx512,

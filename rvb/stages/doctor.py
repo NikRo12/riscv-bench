@@ -39,21 +39,33 @@ def _check_disk(ctx):
     return free >= minimum
 
 
+NETWORK_ATTEMPTS = 2          # попыток на адрес: разовый таймаут не должен считаться отказом
+NETWORK_TIMEOUT = 30          # секунд на попытку
+
+
 def _check_network(ctx):
-    """Достаточно получить любой ответ сервера: даже HTTP 405 значит, что сеть работает."""
-    good = True
+    """Проверить доступность адресов. Это только предупреждение, сборку оно не останавливает.
+
+    Достаточно получить любой ответ сервера: даже HTTP 405 значит, что сеть работает.
+    Адрес может отвечать медленно, а реальное скачивание (этапы bootstrap и fetch) ждёт дольше
+    и повторяет попытки, поэтому недоступность здесь - повод посмотреть, а не остановиться.
+    """
     urls = [ctx.toolchain["micromamba_url"], *ctx.host["check_urls"]]
     for url in urls:
-        try:
-            request = urllib.request.Request(url, headers={"Range": "bytes=0-0"})
-            urllib.request.urlopen(request, timeout=15).read(1)
-            note(f"[ok] сеть: {url}")
-        except urllib.error.HTTPError as ex:
-            note(f"[ok] сеть: {url} (ответ HTTP {ex.code})")
-        except Exception as ex:
-            note(f"[!!] сеть: {url} ({ex})")
-            good = False
-    return good
+        error = None
+        for _attempt in range(NETWORK_ATTEMPTS):
+            try:
+                request = urllib.request.Request(url, headers={"Range": "bytes=0-0"})
+                urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT).read(1)
+                note(f"[ok] сеть: {url}")
+                break
+            except urllib.error.HTTPError as ex:
+                note(f"[ok] сеть: {url} (ответ HTTP {ex.code})")
+                break
+            except Exception as ex:
+                error = ex
+        else:
+            note(f"[??] сеть: {url} ({error}); не критично, нужный этап сам повторит попытку")
 
 
 def run(ctx):
@@ -62,8 +74,8 @@ def run(ctx):
         _check_python(),
         _check_tools(),
         _check_disk(ctx),
-        _check_network(ctx),
     ]
+    _check_network(ctx)                       # только предупреждения, на результат не влияет
     note(f"[ok] ядер: {os.cpu_count()}")
     if not all(results):
         die("doctor нашёл проблемы (см. [!!])")

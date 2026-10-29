@@ -16,6 +16,10 @@ abi = "lp64d"
 # (ошибка "unknown cpu"), поэтому взято ближайшее известное ядро с RVV.
 tune = "sifive-p670"
 
+# Наборы ядер для замеров (run.sh: CORES=имя). Первый набор - по умолчанию.
+# Узнать: частоты ядер  cat /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq  (ядра 0-7 быстрее, 8-15 медленнее)
+core_sets = { x100 = "0-7", a100 = "8-15" }
+
 # Системные библиотеки платы: их НЕ нужно класть в бандл (проверка verify пропускает их по префиксу имени).
 system_libs = ["libc.so", "libm.so", "libstdc++", "libgcc_s", "ld-linux", "libpthread", "libdl", "librt", "libgomp"]
 

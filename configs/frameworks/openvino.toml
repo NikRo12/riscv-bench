@@ -20,8 +20,9 @@ commit = "f1862f38f83568d96e814e469ab61f88336cc595"
 # ---------------------------------------------------------------- патчи
 # Применяются к чистым исходникам по порядку. dir - куда заходить перед `git apply`
 # (для подмодуля это его папка: у него свой git). Файлы лежат в patches/openvino/.
-# Эти правки сняты с рабочей копии на плате; их происхождение автором не подтверждено.
+# ov_rvv.patch и onednn_rvv.patch сняты с рабочей копии на плате; их происхождение автором не подтверждено.
 # Без них свёртки идут через ref-реализацию, и сборка медленнее нативной в 1,8 раза (94 с против 51 с).
+# gemm_ref.patch добавлен 2026-10-29 из riscv-bench-gemm (К. Садов, sha256 3f35e6f1...).
 [[patches]]
 file = "ov_rvv.patch"
 dir = "."
@@ -31,6 +32,11 @@ note = "conv.cpp + convolution_implementations.cpp: исполнитель convo
 file = "onednn_rvv.patch"
 dir = "src/plugins/intel_cpu/thirdparty/onednn"
 note = "cpu_convolution_list.cpp: регистрация rvv_brgemm_convolution_fwd_t (brgemm:rvv); происхождение не подтверждено автором"
+
+[[patches]]
+file = "gemm_ref.patch"
+dir = "."
+note = "iml_type_mapper.h/.cpp + conv.cpp: тип gemm_ref = gemm | ref и его приоритет при выборе свёртки; автор К. Садов; правильность выходов сборки не проверена"
 
 
 # ---------------------------------------------------------------- сборка
@@ -79,9 +85,6 @@ dest = "tbb"
 [run]
 bench = "bin/benchmark_app"                        # исполняемый файл бенчмарка внутри бандла
 library_dirs = ["bin", "tbb"]                      # что добавить в LD_LIBRARY_PATH (пути внутри бандла)
-# Подстановки: {bench} {model} {threads} {niter}. Перед командой run.sh сам ставит `taskset -c 0-(threads-1)`.
-command = "{bench} -m {model} -d CPU -hint none -api sync -nthreads {threads} -nstreams 1 -nireq 1 -infer_precision f32 -niter {niter}"
-
 # Какие числа вытащить из вывода бенчмарка в results.csv. pattern - регулярка для sed -E,
 # число - в первой группе (...). Символ / в регулярке использовать нельзя.
 metrics = [
@@ -92,6 +95,24 @@ metrics = [
   { name = "fps",       pattern = 'Throughput:[[:space:]]+([0-9.]+) FPS' },
 ]
 
+# Сценарии замера. param - что перебираем (threads или batch), values - значения по умолчанию,
+# cpus: first = первые N ядер выбранного набора (N = значение), all = весь набор ядер.
+# Подстановки в command: {bench} {model} {threads} {batch} {niter} {duration} {report_dir}.
+# Перед командой run.sh сам ставит taskset на нужные ядра.
+
+[[run.scenarios]]
+name = "latency"
+param = "threads"
+values = [1, 2, 4, 8]
+cpus = "first"
+command = "{bench} -m {model} -d CPU -hint none -api sync -b 1 -nthreads {threads} -nstreams 1 -nireq 1 -infer_precision f32 -niter {niter} -report_type no_counters -report_folder {report_dir}"
+
+[[run.scenarios]]
+name = "throughput"
+param = "batch"
+values = [2, 4, 8, 16, 32, 64]
+cpus = "all"
+command = "{bench} -m {model} -d CPU -hint none -api async -b {batch} -nthreads 8 -nstreams 8 -nireq 8 -infer_precision f32 -t {duration} -report_type no_counters -report_folder {report_dir}"
 
 # ---------------------------------------------------------------- проверка бандла (этап verify)
 [verify]

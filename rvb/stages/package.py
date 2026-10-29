@@ -59,14 +59,15 @@ def _bash_quote(text):
     return "'" + text.replace("'", "'\\''") + "'"
 
 
-def _render_run_command(command):
-    """Подставить в команду запуска переменные run.sh: {bench} {model} {threads} {niter}."""
-    variables = {"bench": '"$BENCH"', "model": '"$MODEL"', "threads": '"$n"', "niter": '"$NITER"'}
+def _render_run_command(command, scenario):
+    """Подставить в команду переменные run.sh. Результат - слова для bash-массива CMD."""
+    variables = {"bench": '"$BENCH"', "model": '"$MODEL"', "threads": '"$threads"', "batch": '"$batch"',
+                 "niter": '"$NITER"', "duration": '"$DURATION"', "report_dir": '"$REPORT_DIR"'}
     for key, value in variables.items():
         command = command.replace("{" + key + "}", value)
     unknown = re.findall(r"\{[A-Za-z_]+\}", command)
     if unknown:
-        die(f"в [run] command неизвестная подстановка {unknown[0]} "
+        die(f"в [[run.scenarios]] '{scenario}' неизвестная подстановка {unknown[0]} "
             f"(доступны: {', '.join('{' + k + '}' for k in variables)})")
     return command
 
@@ -74,11 +75,22 @@ def _render_run_command(command):
 def _write_run_script(ctx, out_dir):
     run_cfg = ctx.fw["run"]
     metrics = run_cfg["metrics"]
+    scenarios = run_cfg["scenarios"]
+    core_sets = ctx.board["core_sets"]
     replacements = {
         "@@BENCH@@": run_cfg["bench"],
         "@@MODEL@@": f"model/{ctx.model['entry']}",
         "@@LIBRARY_DIRS@@": ":".join(f"$HERE/{d}" for d in run_cfg["library_dirs"]),
-        "@@RUN_COMMAND@@": _render_run_command(run_cfg["command"]),
+        "@@CORE_SETS@@": " ".join(f"[{name}]={_bash_quote(cores)}" for name, cores in core_sets.items()),
+        "@@DEFAULT_CORES@@": next(iter(core_sets)),
+        "@@SCENARIO_NAMES@@": " ".join(sc["name"] for sc in scenarios),
+        "@@SC_PARAM@@": " ".join(f"[{sc['name']}]={sc['param']}" for sc in scenarios),
+        "@@SC_VALUES@@": " ".join(f"[{sc['name']}]={_bash_quote(' '.join(str(v) for v in sc['values']))}"
+                                  for sc in scenarios),
+        "@@SC_CPUS@@": " ".join(f"[{sc['name']}]={sc['cpus']}" for sc in scenarios),
+        "@@SCENARIO_COMMANDS@@": "\n".join(
+            f"cmd_{sc['name']}() {{ CMD=({_render_run_command(sc['command'], sc['name'])}); }}"
+            for sc in scenarios),
         "@@METRIC_NAMES@@": " ".join(m["name"] for m in metrics),
         "@@METRIC_PATTERNS@@": " ".join(_bash_quote(m["pattern"]) for m in metrics),
     }

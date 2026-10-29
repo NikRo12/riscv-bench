@@ -12,6 +12,7 @@ tail -40 work/logs/<этап>.log          # bootstrap, fetch, patch, build-oneT
 
 | Симптом | Причина | Что делать |
 |---|---|---|
+| `doctor`: `[??] сеть: ... timed out` | адрес отвечает медленно | это предупреждение, сборку оно не останавливает. Скачивание в `bootstrap` ждёт дольше и повторяет попытки (3 раза); если всё же не вышло, проверьте `curl -I <адрес>` и повторите `python3 build.py bootstrap` |
 | `doctor`: `HTTP Error 405` для micromamba | старая проверка сети использовала запрос HEAD | обновить код (в текущей версии исправлено) |
 | `git: command not found` | на сервере нет системного git | после `bootstrap` наш лежит в `work/toolchain/env/bin`: `export PATH=$PWD/work/toolchain/env/bin:$PATH`. Сам `build.py` справляется без этого |
 | `error while loading shared libraries: libisl.so.23` (и `libbfd`, `libopcodes`) | компилятору не хватает x86-библиотек | добавить пакет в `host_debs` в `target.toml`, выполнить `python3 build.py bootstrap`. Не запускайте кросс-GCC вручную без `PATH` и `LD_LIBRARY_PATH` из `ctx.env()` |
